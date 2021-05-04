@@ -10,6 +10,68 @@ zx, zw = trigauss.trigauss_boundary(2)
 zx8, zw8 = trigauss.trigauss(8)
 Nquad = len(zw)
 
+############################################################
+# P0, P1, P2 BASIS FUNCTIONS
+############################################################
+
+#P0 basis and derivative
+p0_basis = [
+    lambda r,s: 1
+]
+p0_r = [
+    lambda r,s: 0
+]
+p0_s = [
+    lambda r,s: 0
+]
+
+#P1 basis and derivatives
+p1_basis = [
+    lambda r, s: 1-r-s,
+    lambda r, s: r,
+    lambda r, s: s,
+]
+p1_r = [
+    lambda r, s: -1,
+    lambda r, s: 1,
+    lambda r, s: 0,
+]
+p1_s = [
+    lambda r, s: -1,
+    lambda r, s: 0,
+    lambda r, s: 1,
+]
+
+#P2 basis and derivatives
+p2_basis = [
+    lambda r, s: (1-r-s)*(1-2*r-2*s),
+    lambda r, s: r*(2*r-1),
+    lambda r, s: s*(2*s-1),
+    lambda r, s: 4*r*(1-r-s),
+    lambda r, s: 4*r*s,
+    lambda r, s: 4*s*(1-r-s),
+]
+p2_r = [
+    lambda r, s: -(1-2*r-2*s)-2*(1-r-s),
+    lambda r, s: 4*r-1,
+    lambda r, s: 0,
+    lambda r, s: 4*(1-r-s) - 4*r,
+    lambda r, s: 4*s,
+    lambda r, s: 4*s*-1,
+]
+p2_s = [
+    lambda r, s: -(1-2*r-2*s)-2*(1-r-s),
+    lambda r, s: 0,
+    lambda r, s: 4*s-1,
+    lambda r, s: -4*r,
+    lambda r, s: 4*r,
+    lambda r, s: 4*(1-r-s)-4*s,
+]
+
+############################################################
+# HELPERS
+############################################################
+
 def make_trans(def_tri):
     '''
     Creates the translation matrix from points on the reference triangle
@@ -113,11 +175,6 @@ def draw_triangles_quad(points, tris):
         x = np.append(x,x[0]); y = np.append(y,y[0])
         plt.plot(x,y,'-')
 
-v_pts = np.array([
-    [0.,1.,0.],
-    [0.,0.,1.]
-])
-
 def compute_deriv_r(tri, X):
     Dr = np.array([-1.,1.,0.])
     t_pts = trans(tri, X)
@@ -157,48 +214,21 @@ def create_scatter(points, triangles):
             Q[tri[j], loc_start + j] = 1
     return Q.tocsr()
 
-#P1 basis and derivatives
-p1_basis = [
-    lambda r, s: 1-r-s,
-    lambda r, s: r,
-    lambda r, s: s,
-]
-p1_r = [
-    lambda r, s: -1,
-    lambda r, s: 1,
-    lambda r, s: 0,
-]
-p1_s = [
-    lambda r, s: -1,
-    lambda r, s: 0,
-    lambda r, s: 1,
-]
+def create_restriction(N, bcs):
+    '''
+    Create the restriction operator that enforces Dirichlet conditions by
+    removing specific nodes from a matrix.
 
-#P2 basis and derivatives
-p2_basis = [
-    lambda r, s: (1-r-s)*(1-2*r-2*s),
-    lambda r, s: r*(2*r-1),
-    lambda r, s: s*(2*s-1),
-    lambda r, s: 4*r*(1-r-s),
-    lambda r, s: 4*r*s,
-    lambda r, s: 4*s*(1-r-s),
-]
-p2_r = [
-    lambda r, s: -(1-2*r-2*s)-2*(1-r-s),
-    lambda r, s: 4*r-1,
-    lambda r, s: 0,
-    lambda r, s: 4*(1-r-s) - 4*r,
-    lambda r, s: 4*s,
-    lambda r, s: 4*s*-1,
-]
-p2_s = [
-    lambda r, s: -(1-2*r-2*s)-2*(1-r-s),
-    lambda r, s: 0,
-    lambda r, s: 4*s-1,
-    lambda r, s: -4*r,
-    lambda r, s: 4*r,
-    lambda r, s: 4*(1-r-s)-4*s,
-]
+    N - number of global DOF
+    bcs - list of nodes to remove
+    '''
+    R = sp.eye(N).tocsc()
+    cols_keep = np.setdiff1d(np.arange(N), bcs, assume_unique=True)
+    return R[:,cols_keep]
+
+############################################################
+# CONTINUOUS QUADRATIC VELOCITY, LINEAR PRESSURE
+############################################################
 
 def create_local_elem_taylor_hood(lpts, ltris, qpts, qtris, e):
     '''
@@ -307,79 +337,99 @@ def assemble_taylor_hood_matrices(lpts, ltris):
 
     return Q_q@A_L@Q_q.T, Q_q@B_L@Q_q.T, Q_l@D1_L@Q_q.T, Q_l@D2_L@Q_q.T, qpts, qtris
 
+############################################################
+# CONTINUOUS LINEAR VELOCITY, LINEAR PRESSURE
+############################################################
 
-def create_local_elem(def_tri):
+def create_local_p1p1(lpts, ltris, e):
     '''
-    Creates the stiffness, mass matrices for a single element.
-
-    def_tri - 2 x 3 array of points defining the triangle.
-
-    Returns A, B
+    Create a local element, with P1 triangles for both velocity and pressure.
+    
+    lpts - linear points
+    ltris - linear triangles
+    e - index into triangles arrays
+    
+    returns A,B,D1,D2
     '''
+    tri_l = get_triangle(lpts, ltris, e)
     v_pts = np.array([
         [0.,1.,0.],
         [0.,0.,1.]
     ])
-    # dX/dR
-    metrics = np.column_stack([compute_deriv_r(def_tri, v_pts), compute_deriv_s(def_tri, v_pts)])
-    # dR/dX
+    # compute metrics
+    metrics = np.column_stack([compute_deriv_r(tri_l, v_pts), compute_deriv_s(tri_l, v_pts)]) # [dx/dr dx/ds] [dy/dr dy/ds]
     inv_metrics = inv2x2(metrics) # [dr/dx dr/dy] [ds/dx ds/dy]
-    # jacobian determinant
-    J = la.det(metrics)
-    # integral change of basis
-    Rmat = sp.kron(inv_metrics, sp.eye(Nquad))
-    # diagonal mass matrix
-    Bh = sp.diags([zw * J], [0])
-    B = sp.kron(Bh, sp.eye(2))
-    # derivative matrices
-    Dr = np.array([-1.,1.,0.])
-    Drr = np.row_stack([Dr] * Nquad)
-    Ds = np.array([-1.,0.,1.])
-    Dss = np.row_stack([Ds] * Nquad)
-    Dmat = np.vstack([Drr,Dss])
-    # full stiffness matrix
-    A = Dmat.T @ Rmat.T @ B @ Rmat @ Dmat
-    # divergence operator
+    drdx = inv_metrics[0,0]; drdy = inv_metrics[0,1]
+    dsdx = inv_metrics[1,0]; dsdy = inv_metrics[1,1]
+    J = la.det(metrics) #jacobian determinant
+
+    qn = 3
+    ln = 3
+    Nq = len(zw8)
+
+    A = np.zeros((qn,qn))
+    B = np.zeros((qn,qn))
+
+    # A_{ij} = \int d\phi_i/dx d\phi_j/dy dV
+    # dp/dx = dp/dr dr/dx + dp/ds ds/dx
+    for k in range(Nq):
+        r,s = zx8[k]; w = zw8[k]
+        for i in range(qn):
+            pir = p1_r[i](r,s); pis = p1_s[i](r,s);
+            for j in range(qn):
+                pjr = p1_r[j](r,s); pjs = p1_s[j](r,s)
+                dpix = pir*drdx + pis*dsdx #d\phi_i/dx
+                dpjx = pjr*drdx + pjs*dsdx #d\phi_j/dx
+                dpiy = pir*drdy + pis*dsdy #d\phi_i/dy
+                dpjy = pjr*drdy + pjs*dsdy #d\phi_j/dy
+                a = dpix*dpjx*w*J # dv/dx du/dx
+                b = dpiy*dpjy*w*J # dv/dy du/dy
+                A[i,j] += (a+b)
+
+    # B_{ij} = \int \phi_i \phi_j dV
+    for k in range(Nq):
+        r,s = zx8[k]; w = zw8[k]
+        for i in range(qn):
+            pi = p1_basis[i](r,s)
+            for j in range(qn):
+                pj = p1_basis[j](r,s)
+                B[i,j] += pi*pj*w*J
+
     # (D1)_{ij} = \int \psi_i (d\phi_j/dr dr/dx + d\phi_j/ds ds/dx) dV
     # (D2)_{ij} = \int \psi_i (d\phi_j/dr dr/dy + d\phi_j/ds ds/dy) dV
-    D1 = np.zeros((3,3))
-    D2 = np.zeros((3,3))
-    for i in range(3): #row
-        for j in range(3): #col
-            for k in range(Nquad): #quadrature point
-                psi_i = 0
-                r,s = zx[k]
-                if i==0:
-                    psi_i = 1-r-s
-                if i==1:
-                    psi_i = r
-                if i==2:
-                    psi_i = s
-                phi_j_r = Dr[j]
-                phi_j_s = Ds[j]
-                D1[i,j] += psi_i * (phi_j_r * inv_metrics[0,0] + phi_j_s * inv_metrics[1,0]) * zw[k] * J
-                D2[i,j] += psi_i * (phi_j_r * inv_metrics[0,1] + phi_j_s * inv_metrics[1,1]) * zw[k] * J
+    D1 = np.zeros((ln,qn))
+    D2 = np.zeros((ln,qn))
+    for i in range(ln):
+        for j in range(qn):
+            for k in range(Nq):
+                r,s = zx8[k]; w = zw8[k]
+                psi_i = p1_basis[i](r,s)
+                phi_j_r = p1_r[j](r,s)
+                phi_j_s = p1_s[j](r,s)
+                D1[i,j] += psi_i * (phi_j_r * drdx + phi_j_s * dsdx) * w * J
+                D2[i,j] += psi_i * (phi_j_r * drdy + phi_j_s * dsdy) * w * J
 
-    return A, Bh, D1, D2
+    return A,B,D1,D2
 
-def assemble_matrices(points, triangles):
+def assemble_p1p1(lpts, ltris):
     '''
-    Assemble stiffness and mass matrices given a mesh.
+    Assemble stiffness and mass matrices given a mesh, using p1 triangles for both
+    velocity, pressure.
 
     points - N x 2 array of points
-    triangles - M x 3 array of triangles, indexing into the points array.
+    triangles - M x 3 array of triangles, indexing into the points array
 
-    Returns global A, B
+    Returns global A, B, Dx, Dy
     '''
-    Q = create_scatter(points, triangles)
+    Q = create_scatter(lpts, ltris)
+
     A_L = []
     B_L = []
     D1_L = []
     D2_L = []
 
-    for i in range(triangles.shape[0]):
-        tri = get_triangle(points, triangles, i)
-        A_e, B_e, Dx_e, Dy_e = create_local_elem(tri)
+    for i in range(ltris.shape[0]):
+        A_e, B_e, Dx_e, Dy_e = create_local_p1p1(lpts, ltris, i)
         A_L.append(A_e)
         B_L.append(B_e)
         D1_L.append(Dx_e)
@@ -392,14 +442,107 @@ def assemble_matrices(points, triangles):
 
     return Q@A_L@Q.T, Q@B_L@Q.T, Q@D1_L@Q.T, Q@D2_L@Q.T
 
-def create_restriction(N, bcs):
-    '''
-    Create the restriction operator that enforces Dirichlet conditions by
-    removing specific nodes from a matrix.
+############################################################
+# CONTINUOUS LINEAR VELOCITY, DISCONTINUOUS PRESSURE
+############################################################
 
-    N - number of global DOF
-    bcs - list of nodes to remove
+def create_local_p1p0(lpts, ltris, e):
     '''
-    R = sp.eye(N).tocsc()
-    cols_keep = np.setdiff1d(np.arange(N), bcs, assume_unique=True)
-    return R[:,cols_keep]
+    Create a local element, with P1 triangles for velocity and P0 (constant) triangles for pressure
+    
+    lpts - linear points
+    ltris - linear triangles
+    e - index into triangles arrays
+    
+    returns A,B,D1,D2
+    '''
+    tri_l = get_triangle(lpts, ltris, e)
+    v_pts = np.array([
+        [0.,1.,0.],
+        [0.,0.,1.]
+    ])
+    # compute metrics
+    metrics = np.column_stack([compute_deriv_r(tri_l, v_pts), compute_deriv_s(tri_l, v_pts)]) # [dx/dr dx/ds] [dy/dr dy/ds]
+    inv_metrics = inv2x2(metrics) # [dr/dx dr/dy] [ds/dx ds/dy]
+    drdx = inv_metrics[0,0]; drdy = inv_metrics[0,1]
+    dsdx = inv_metrics[1,0]; dsdy = inv_metrics[1,1]
+    J = la.det(metrics) #jacobian determinant
+
+    qn = 3
+    ln = 1
+    Nq = len(zw8)
+
+    A = np.zeros((qn,qn))
+    B = np.zeros((qn,qn))
+
+    # A_{ij} = \int d\phi_i/dx d\phi_j/dy dV
+    # dp/dx = dp/dr dr/dx + dp/ds ds/dx
+    for k in range(Nq):
+        r,s = zx8[k]; w = zw8[k]
+        for i in range(qn):
+            pir = p1_r[i](r,s); pis = p1_s[i](r,s);
+            for j in range(qn):
+                pjr = p1_r[j](r,s); pjs = p1_s[j](r,s)
+                dpix = pir*drdx + pis*dsdx #d\phi_i/dx
+                dpjx = pjr*drdx + pjs*dsdx #d\phi_j/dx
+                dpiy = pir*drdy + pis*dsdy #d\phi_i/dy
+                dpjy = pjr*drdy + pjs*dsdy #d\phi_j/dy
+                a = dpix*dpjx*w*J # dv/dx du/dx
+                b = dpiy*dpjy*w*J # dv/dy du/dy
+                A[i,j] += (a+b)
+
+    # B_{ij} = \int \phi_i \phi_j dV
+    for k in range(Nq):
+        r,s = zx8[k]; w = zw8[k]
+        for i in range(qn):
+            pi = p1_basis[i](r,s)
+            for j in range(qn):
+                pj = p1_basis[j](r,s)
+                B[i,j] += pi*pj*w*J
+
+    # (D1)_{ij} = \int \psi_i (d\phi_j/dr dr/dx + d\phi_j/ds ds/dx) dV
+    # (D2)_{ij} = \int \psi_i (d\phi_j/dr dr/dy + d\phi_j/ds ds/dy) dV
+    D1 = np.zeros((ln,qn))
+    D2 = np.zeros((ln,qn))
+    for i in range(ln):
+        for j in range(qn):
+            for k in range(Nq):
+                r,s = zx8[k]; w = zw8[k]
+                psi_i = p0_basis[i](r,s)
+                phi_j_r = p1_r[j](r,s)
+                phi_j_s = p1_s[j](r,s)
+                D1[i,j] += psi_i * (phi_j_r * drdx + phi_j_s * dsdx) * w * J
+                D2[i,j] += psi_i * (phi_j_r * drdy + phi_j_s * dsdy) * w * J
+
+    return A,B,D1,D2
+
+def assemble_p1p0(lpts, ltris):
+    '''
+    Assemble stiffness and mass matrices given a mesh, using p1 triangles for
+    velocity, p0 for pressure.
+
+    points - N x 2 array of points
+    triangles - M x 3 array of triangles, indexing into the points array
+
+    Returns global A, B, Dx, Dy
+    '''
+    Q = create_scatter(lpts, ltris)
+
+    A_L = []
+    B_L = []
+    D1_L = []
+    D2_L = []
+
+    for i in range(ltris.shape[0]):
+        A_e, B_e, Dx_e, Dy_e = create_local_p1p0(lpts, ltris, i)
+        A_L.append(A_e)
+        B_L.append(B_e)
+        D1_L.append(Dx_e)
+        D2_L.append(Dy_e)
+
+    A_L = sp.block_diag(A_L)
+    B_L = sp.block_diag(B_L)
+    D1_L = sp.block_diag(D1_L)
+    D2_L = sp.block_diag(D2_L)
+
+    return Q@A_L@Q.T, Q@B_L@Q.T, D1_L@Q.T, D2_L@Q.T
