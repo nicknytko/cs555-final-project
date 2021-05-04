@@ -1,9 +1,36 @@
 import numpy as np
 import warnings
 
+'''
+Gaussian quadrature on reference triangle.
+This code is borrowed from Paul Fischer's lecture notes.
+
+(0,1)
+  |  \
+  |    \
+  |      \
+(0,0) --- (1,0)
+'''
+
+def trigauss_boundary(n):
+    '''
+    Not really used.  Generates quadrature points on the boundary for a linear triangle.
+    These are just the vertex points with appropriate even weighting.
+    '''
+    if (n==2):
+        xw=np.array([
+            [0.0, 0.0, 1/3],
+            [0.0, 1.0, 1/3],
+            [1.0, 0.0, 1/3]])
+        qx = xw[:,:2]
+        qw = xw[:,2]/2
+        return qx, qw
+    else:
+        return trigauss(n)
+
 def trigauss(n):
     '''
-    Generates Gauss-Lobatto-Legendre (GLL) points in reference triangular domain.
+    Generates Gauss points in reference triangular domain.
 
     n - quadrature degree
     returns points, weights
