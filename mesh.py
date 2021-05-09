@@ -29,4 +29,5 @@ def load_mesh(file):
             pt_vals = np.unique(cell[1].flatten())
             boundaries.append(pt_vals)
     
+    print(f'Loaded mesh with {len(pts)} vertices')
     return pts, np.array(triangles), boundaries
