@@ -5,3 +5,5 @@ This project contains codes to solve the steady-state [Stokes flow](https://en.w
 For our domain, we take an elongated rectangle with a cylinder cut out in the middle.  The fluid is expected to flow around this obstacle.
 
 ![](example-out.png)
+
+Note the finite element assembly code is woefully unoptimized and may benefit greatly from careful vectorisation (by converting all operation to matrix-matrix/matrix-vector products, for example).  Still, I hope someone finds it useful or interesting to look it.
