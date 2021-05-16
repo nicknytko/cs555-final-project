@@ -301,7 +301,16 @@ def create_local_elem_taylor_hood(lpts, ltris, qpts, qtris, e):
                 D1[i,j] += psi_i * (phi_j_r * drdx + phi_j_s * dsdx) * w * J
                 D2[i,j] += psi_i * (phi_j_r * drdy + phi_j_s * dsdy) * w * J
 
-    return A,B,D1,D2
+    B2 = np.zeros((ln,ln))
+    for k in range(Nq):
+        r,s = zx8[k]; w = zw8[k]
+        for i in range(ln):
+            psi_i = p1_basis[i](r,s)
+            for j in range(ln):
+                psi_j = p1_basis[i](r,s)
+                B2[i,j] += psi_i * psi_j * w * J
+                
+    return A,B,D1,D2,B2
 
 def assemble_taylor_hood_matrices(lpts, ltris):
     '''
@@ -322,20 +331,23 @@ def assemble_taylor_hood_matrices(lpts, ltris):
     B_L = []
     D1_L = []
     D2_L = []
+    B2_L = []
 
     for i in range(ltris.shape[0]):
-        A_e, B_e, Dx_e, Dy_e = create_local_elem_taylor_hood(lpts, ltris, qpts, qtris, i)
+        A_e, B_e, Dx_e, Dy_e, B2_e = create_local_elem_taylor_hood(lpts, ltris, qpts, qtris, i)
         A_L.append(A_e)
         B_L.append(B_e)
         D1_L.append(Dx_e)
         D2_L.append(Dy_e)
+        B2_L.append(B2_e)
 
     A_L = sp.block_diag(A_L)
     B_L = sp.block_diag(B_L)
     D1_L = sp.block_diag(D1_L)
     D2_L = sp.block_diag(D2_L)
+    B2_L = sp.block_diag(B2_L)
 
-    return Q_q@A_L@Q_q.T, Q_q@B_L@Q_q.T, Q_l@D1_L@Q_q.T, Q_l@D2_L@Q_q.T, qpts, qtris
+    return Q_q@A_L@Q_q.T, Q_q@B_L@Q_q.T, Q_l@D1_L@Q_q.T, Q_l@D2_L@Q_q.T, Q_l@B2_L@Q_l.T, qpts, qtris
 
 ############################################################
 # CONTINUOUS LINEAR VELOCITY, LINEAR PRESSURE
